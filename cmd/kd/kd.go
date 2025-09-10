@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,7 @@ var um = map[string]string{
 	"force":           "forcely update (only after --update) 强制更新（仅搭配--update）",
 	"theme":           "choose the color theme for current query 选择颜色主题，仅当前查询生效",
 	"json":            "output as JSON",
+	"interactive":     "enter interactive mode for continuous queries 进入交互模式，可连续查询单词",
 	"init":            "initialize shell completion 初始化部分设置，例如shell的自动补全",
 	"server":          "start server foreground 在前台启动服务端",
 	"daemon":          "ensure/start the daemon process 启动守护进程",
@@ -259,6 +261,83 @@ func basicCheck() {
 	// }
 }
 
+// 处理单次查询
+func handleQuery(qstr string, cCtx *cli.Context, cfg *config.Config) error {
+	if r, err := internal.Query(qstr, cCtx.Bool("nocache"), cCtx.Bool("text")); err == nil {
+		if cCtx.Bool("json") {
+			if j, jsonErr := json.Marshal(r); jsonErr == nil {
+				fmt.Println(string(j))
+				return nil
+			} else {
+				return fmt.Errorf("转化JSON失败：%s", jsonErr)
+			}
+		}
+
+		if cfg.FreqAlert {
+			if h := <-r.History; h > 3 {
+				d.EchoWarn(fmt.Sprintf("本月第%d次查询`%s`", h, r.Query))
+			}
+		}
+		if r.Found {
+			if err = pkg.OutputResult(query.PrettyFormat(r, cfg.EnglishOnly), cfg.Paging, cfg.PagerCommand); err != nil {
+				d.EchoFatal(err.Error())
+			}
+			if cCtx.Bool("speak") {
+				if cCtx.Bool("text") {
+					d.EchoWarn("读音功能暂不支持长文本模式")
+				} else {
+					if err = tts.Speak(qstr); err != nil {
+						d.EchoWarn("发音功能报错：%s", err)
+						zap.S().Warnf("Failed to read the word. Error: %s", err)
+					}
+				}
+			}
+		} else {
+			if r.Prompt != "" {
+				d.EchoWrong(r.Prompt)
+			} else {
+				fmt.Println("Not found", d.Yellow(":("))
+			}
+		}
+	} else {
+		d.EchoError(err.Error())
+		zap.S().Errorf("%+v", err)
+	}
+	return nil
+}
+
+// 处理交互模式
+func handleInteractiveMode(cCtx *cli.Context, cfg *config.Config) {
+	d.EchoOkay("进入交互模式，输入单词或短语进行查询，输入 'exit' 或 'quit' 退出")
+
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print(d.Green("kd> "))
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			d.EchoError("读取输入失败: %s", err.Error())
+			continue
+		}
+
+		// 去除输入的前后空白字符
+		input = strings.TrimSpace(input)
+
+		// 检查是否退出
+		if input == "exit" || input == "quit" || input == "q" {
+			d.EchoOkay("退出交互模式")
+			break
+		}
+
+		// 跳过空输入
+		if input == "" {
+			continue
+		}
+
+		// 处理查询
+		handleQuery(input, cCtx, cfg)
+	}
+}
+
 func main() {
 	basicCheck()
 	if err := config.InitConfig(); err != nil {
@@ -310,6 +389,7 @@ func main() {
 			&cli.StringFlag{Name: "theme", Aliases: []string{"T"}, DefaultText: "temp", Usage: um["theme"]},
 			&cli.BoolFlag{Name: "force", Aliases: []string{"f"}, DisableDefaultText: true, Usage: um["force"]},
 			&cli.BoolFlag{Name: "speak", Aliases: []string{"s"}, DisableDefaultText: true, Usage: um["speak"]},
+			&cli.BoolFlag{Name: "interactive", Aliases: []string{"i"}, DisableDefaultText: true, Usage: um["interactive"]},
 
 			// BoolFlags as commands
 			// &cli.BoolFlag{Name: "init", DisableDefaultText: true, Hidden: true, Usage: um["init"]},
@@ -346,6 +426,15 @@ func main() {
 			}
 			d.ApplyTheme(cfg.Theme)
 
+			// 处理交互模式
+			if cCtx.Bool("interactive") {
+				if cfg.ClearScreen {
+					pkg.ClearScreen()
+				}
+				handleInteractiveMode(cCtx, cfg)
+				return nil
+			}
+
 			if cCtx.Args().Len() > 0 {
 				zap.S().Debugf("Recieved Arguments (len: %d): %+v", cCtx.Args().Len(), cCtx.Args().Slice())
 				// emoji.Printf("Test emoji:\n:accept: :inbox_tray: :information: :us: :uk:  🗣  :lips: :eyes: :balloon: \n")
@@ -354,47 +443,7 @@ func main() {
 				}
 
 				qstr := strings.Join(cCtx.Args().Slice(), " ")
-
-				if r, err := internal.Query(qstr, cCtx.Bool("nocache"), cCtx.Bool("text")); err == nil {
-					if cCtx.Bool("json") {
-						if j, jsonErr := json.Marshal(r); jsonErr == nil {
-							fmt.Println(string(j))
-							return nil
-						} else {
-							return fmt.Errorf("转化JSON失败：%s", jsonErr)
-						}
-					}
-
-					if cfg.FreqAlert {
-						if h := <-r.History; h > 3 {
-							d.EchoWarn(fmt.Sprintf("本月第%d次查询`%s`", h, r.Query))
-						}
-					}
-					if r.Found {
-						if err = pkg.OutputResult(query.PrettyFormat(r, cfg.EnglishOnly), cfg.Paging, cfg.PagerCommand); err != nil {
-							d.EchoFatal(err.Error())
-						}
-						if cCtx.Bool("speak") {
-							if cCtx.Bool("text") {
-								d.EchoWarn("读音功能暂不支持长文本模式")
-							} else {
-								if err = tts.Speak(qstr); err != nil {
-									d.EchoWarn("发音功能报错：%s", err)
-									zap.S().Warnf("Failed to read the word. Error: %s", err)
-								}
-							}
-						}
-					} else {
-						if r.Prompt != "" {
-							d.EchoWrong(r.Prompt)
-						} else {
-							fmt.Println("Not found", d.Yellow(":("))
-						}
-					}
-				} else {
-					d.EchoError(err.Error())
-					zap.S().Errorf("%+v", err)
-				}
+				return handleQuery(qstr, cCtx, cfg)
 			} else {
 				showPrompt()
 			}
@@ -403,7 +452,6 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		zap.S().Errorf("APP stopped: %s", err)
-		d.EchoError(err.Error())
+		d.EchoFatal(err.Error())
 	}
 }
