@@ -11,6 +11,7 @@ import (
 	"github.com/Karmenzind/kd/pkg"
 	d "github.com/Karmenzind/kd/pkg/decorate"
 	"go.uber.org/zap"
+	// "github.com/kyokomi/emoji/v2"
 )
 
 func main() {
@@ -22,7 +23,6 @@ func main() {
 	}
 	cfg := config.Cfg
 	d.ApplyConfig(cfg.EnableEmoji)
-
 
 	if cfg.Logging.Enable {
 		l, err := logger.InitLogger(&cfg.Logging)
@@ -41,7 +41,7 @@ func main() {
 	zap.S().Debugf("Got configuration: %+v", cfg)
 	zap.S().Debugf("Got run info: %+v", run.Info)
 
-	if err := tts.Speak("abandon") ; err != nil {
+	if err := tts.Speak("abandon"); err != nil {
 		log.Printf("Error: %s", err)
 	}
 }

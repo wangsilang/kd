@@ -9,7 +9,7 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/gookit/color v1.5.4
 	github.com/jinzhu/configor v1.2.2
-	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/shirou/gopsutil/v4 v4.24.12
 	github.com/urfave/cli/v2 v2.27.5
 	go.uber.org/zap v1.27.0
